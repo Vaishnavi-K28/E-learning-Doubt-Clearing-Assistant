@@ -1,0 +1,116 @@
+const MIME_TYPES = {
+  ".html": "text/html",
+  ".css": "text/css",
+  ".js": "application/javascript",
+  ".json": "application/json",
+  ".png": "image/png",
+  ".ico": "image/x-icon",
+};
+
+const server = createServer((req, res) => {
+  const url = new URL(req.url, `http://localhost:${PORT}`);
+  const pathname = url.pathname;
+
+  // ── CORS ──
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+
+  if (req.method === "OPTIONS") { res.writeHead(204); res.end(); return; }
+
+  // ── API Routes ──
+  if (pathname.startsWith("/api/")) {
+    res.setHeader("Content-Type", "application/json");
+
+    // POST /api/chat
+    if (pathname === "/api/chat" && req.method === "POST") {
+      let body = "";
+      req.on("data", (chunk) => (body += chunk));
+      req.on("end", () => {
+        try {
+          const { message, courseFilter, sessionId } = JSON.parse(body);
+          if (!message || message.trim().length === 0) {
+            res.writeHead(400);
+            res.end(JSON.stringify({ error: "Message is required" }));
+            return;
+          }
+
+          const sid = sessionId || `session_${sessionCounter++}`;
+          if (!conversations[sid]) conversations[sid] = [];
+
+          conversations[sid].push({ role: "user", content: message, timestamp: Date.now() });
+
+          const result = generateResponse(message, courseFilter, sid);
+          const response = { sessionId: sid, query: message, result, timestamp: Date.now() };
+
+          conversations[sid].push({ role: "assistant", content: result, timestamp: Date.now() });
+
+          res.writeHead(200);
+          res.end(JSON.stringify(response));
+        } catch (e) {
+          res.writeHead(400);
+          res.end(JSON.stringify({ error: "Invalid JSON" }));
+        }
+      });
+      return;
+    }
+
+    // GET /api/courses
+    if (pathname === "/api/courses" && req.method === "GET") {
+      res.writeHead(200);
+      res.end(JSON.stringify({ courses }));
+      return;
+    }
+
+    // GET /api/history?sessionId=...
+    if (pathname === "/api/history" && req.method === "GET") {
+      const sid = url.searchParams.get("sessionId");
+      res.writeHead(200);
+      res.end(JSON.stringify({ history: sid ? (conversations[sid] || []) : [] }));
+      return;
+    }
+
+    // GET /api/topics
+    if (pathname === "/api/topics" && req.method === "GET") {
+      const courseId = url.searchParams.get("course");
+      if (courseId && courses[courseId]) {
+        res.writeHead(200);
+        res.end(JSON.stringify({ topics: courses[courseId].topics, course: courses[courseId].name }));
+      } else {
+        res.writeHead(404);
+        res.end(JSON.stringify({ error: "Course not found" }));
+      }
+      return;
+    }
+
+    res.writeHead(404);
+    res.end(JSON.stringify({ error: "Endpoint not found" }));
+    return;
+  }
+
+  // ── Static Files ──
+  let filePath = path.join(__dirname, "public", pathname === "/" ? "index.html" : pathname);
+  const ext = path.extname(filePath);
+  const mime = MIME_TYPES[ext] || "text/plain";
+
+  fs.readFile(filePath, (err, data) => {
+    if (err) {
+      // fallback to index.html for SPA
+      fs.readFile(path.join(__dirname, "public", "index.html"), (e2, d2) => {
+        if (e2) { res.writeHead(404); res.end("Not found"); return; }
+        res.writeHead(200, { "Content-Type": "text/html" });
+        res.end(d2);
+      });
+      return;
+    }
+    res.writeHead(200, { "Content-Type": mime });
+    res.end(data);
+  });
+});
+
+server.listen(PORT, () => {
+  console.log(`\n🎓 E-learning Doubt Clearing Assistant`);
+  console.log(`🚀 Server running at http://localhost:${PORT}`);
+  console.log(`📚 ${Object.keys(courses).length} courses loaded`);
+  console.log(`💡 ${qaDatabase.length} Q&A pairs in knowledge base\n`);
+});
